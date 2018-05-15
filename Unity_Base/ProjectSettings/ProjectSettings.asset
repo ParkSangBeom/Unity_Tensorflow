@@ -670,7 +670,7 @@ PlayerSettings:
   facebookSdkVersion: 7.9.4
   apiCompatibilityLevel: 2
   cloudProjectId: 126692d3-6bb1-4850-8c71-4f83d583dd48
-  projectName: 
+  projectName: Unity_Base
   organizationId: sl-slsl
   cloudEnabled: 0
   enableNativePlatformBackendsForNewInputSystem: 0

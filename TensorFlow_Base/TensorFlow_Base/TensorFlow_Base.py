@@ -8,9 +8,12 @@ import Saver as sv
 
 PROJECT_NAME = "TensorFlow_Base"
 
+# ////////////////////////
+# Do not touch this codes.
 HOST = "127.0.0.1"
 PORT = 9051
 BUFF_SIZE = 10000000
+# ////////////////////////
 
 DISCOUNT = 0.99
 EPSILON = 1e-8
@@ -18,10 +21,7 @@ EPSILON = 1e-8
 EPISODE = 0
 EPISODE_INTERVAL = 100
 
-HEIGHT_SIZE = 10
-WIDTH_SIZE = 10
-DEPTH_SIZE = 1
-INPUT_SIZE = HEIGHT_SIZE * WIDTH_SIZE * DEPTH_SIZE
+INPUT_SIZE = 3
 OUTPUT_SIZE = 2
 
 OBS_LIST = []
@@ -36,11 +36,9 @@ class ActorCriticNetwork:
     _actor_learning_rate = 0.001
     _hidden_size = 100
 
-    def __init__(self, sess, height_size, width_size, depth_size,  output_size, name):
+    def __init__(self, sess, input_size, output_size, name):
         self._sess = sess
-        self._height_size = height_size
-        self._width_size = width_size
-        self._depth_size = depth_size
+        self._input_size = input_size
         self._output_size = output_size
         self._name = name
 
@@ -56,27 +54,14 @@ class ActorCriticNetwork:
         print("TF준비 완료!")
 
     def _BulidBaseNetwork(self):
-        #self._obs = tf.placeholder(tf.float32, shape=[None, self._input_size], name="obs_input")
-        self._obs = tf.placeholder(dtype = tf.float32, shape = [None, self._height_size, self._width_size, self._depth_size], name="obs_input")
+        self._obs = tf.placeholder(tf.float32, shape=[None, self._input_size], name="obs_input")
         self._action = tf.placeholder(tf.float32, shape=[None, self._output_size], name="action_input")
         self._reward = tf.placeholder(tf.float32, shape=[None, 1], name="reward_input")
         self._advantage_value = tf.placeholder(tf.float32, shape=[None, 1], name="advantage_input")
 
-        with tf.name_scope("Conv1"):
-            F1 = tf.Variable(tf.random_normal([3, 3, 1, 8], stddev=0.01))
-            L1 = tf.nn.conv2d(self._obs, F1, strides=[1, 1, 1, 1], padding='VALID')
-            L1 = tf.nn.relu(L1)
-            L1 = tf.nn.max_pool(L1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='VALID')
-
-        with tf.name_scope("Conv2"):
-            F2 = tf.Variable(tf.random_normal([3, 3, 8, 16], stddev=0.01))
-            L2 = tf.nn.conv2d(L1, F2, strides=[1, 1, 1, 1], padding='VALID')
-            L2 = tf.nn.relu(L2)
-            self.L2_flat = tf.reshape(L2, [-1, L2.shape[1] * L2.shape[2] * L2.shape[3]])
-
-        W1 = tf.get_variable("W1", shape = [self.L2_flat.shape[1], self._hidden_size], initializer = tf.contrib.layers.xavier_initializer())
+        W1 = tf.get_variable("W1", shape = [self._input_size, self._hidden_size], initializer = tf.contrib.layers.xavier_initializer())
         b1 = tf.get_variable("b1", shape = [self._hidden_size])
-        self._net = tf.nn.relu(tf.matmul(self.L2_flat, W1) + b1)
+        self._net = tf.nn.relu(tf.matmul(self._obs, W1) + b1)
 
     # [Critic]
     def _BulidCriticNetwork(self):
@@ -99,14 +84,13 @@ class ActorCriticNetwork:
         log_p = -self._action * tf.log(tf.clip_by_value(self._logit, EPSILON, 1.))
 
         entropy = - self._logit * tf.log(tf.clip_by_value(self._logit, EPSILON, 1.))
-        #entropy = tf.reduce_sum(entropy)
         
         log_lik = (log_p * self._advantage_value) + entropy * 0.001
         self._actor_loss = tf.reduce_mean(tf.reduce_sum(log_lik, axis=1))
         self._actor_train = tf.train.AdamOptimizer(self._actor_learning_rate).minimize(self._actor_loss)
     
     def GetAction(self, obs):
-        obs = np.reshape(obs, [-1, self._height_size, self._width_size, self._depth_size])
+        obs = np.reshape(obs, [-1, self._input_size])
         action = self._sess.run([self._logit], feed_dict={self._obs : obs})[0]
         action = np.random.choice(np.arange(self._output_size), p=action[0])
         return action
@@ -123,6 +107,37 @@ class ActorCriticNetwork:
             print("SAVE :", episode)
             self._saver.Save(episode)
 
+
+
+def OneHot(value):
+    zero = np.zeros(OUTPUT_SIZE, dtype = np.int)
+    zero[value] = 1
+    return  zero
+
+def DiscountRewards(reward_memory):
+    v_memory = np.vstack(reward_memory)
+    discounted = np.zeros_like(v_memory, dtype=np.float32)
+    add_value = 0
+    length = len(reward_memory)
+
+    for i in reversed(range(length)):
+        if v_memory[i] < 0:
+            add_value = 0
+        add_value = v_memory[i] + (DISCOUNT * add_value)
+        discounted[i] = add_value
+
+    return discounted
+
+def NormalizeRewards(rewards, v_rewards):
+    a_reward = np.vstack(rewards) - np.vstack(v_rewards)
+    a_reward -= np.mean(a_reward)
+    a_reward /= (np.std(a_reward) + EPSILON)
+    return a_reward
+
+
+# ////////////////////////
+# Do not touch this Server() code.
+# ////////////////////////
 def Server():
     global OBS_LIST
     global ACT_LIST
@@ -160,7 +175,7 @@ def Server():
                             ob = data[key]
                             stack[i] = ob;
 
-                        stack = np.reshape(stack, [1, HEIGHT_SIZE, WIDTH_SIZE, DEPTH_SIZE])
+                        stack = np.reshape(stack, [1, INPUT_SIZE])
                         OBS_LIST.append(stack)
 
                     OBS_LIST = np.vstack(OBS_LIST)
@@ -177,7 +192,7 @@ def Server():
                             ob = data[key]
                             stack[i] = ob;
 
-                        stack = np.reshape(stack, [1, HEIGHT_SIZE, WIDTH_SIZE, DEPTH_SIZE])
+                        stack = np.reshape(stack, [1, INPUT_SIZE])
                         OBS_LIST.append(stack)
 
                         action = data["action"]
@@ -209,6 +224,9 @@ def Server():
 
         conn.close()
 
+# ////////////////////////
+# Make your network.
+# ////////////////////////
 def Network():
     global EPISODE
     global OBS_LIST
@@ -218,7 +236,7 @@ def Network():
     global STATE
 
     with tf.Session() as sess:
-        network = ActorCriticNetwork(sess, HEIGHT_SIZE, WIDTH_SIZE, DEPTH_SIZE, OUTPUT_SIZE, PROJECT_NAME)
+        network = ActorCriticNetwork(sess, INPUT_SIZE, OUTPUT_SIZE, PROJECT_NAME)
         while True:
             if STATE == "state_action":
                 ACTION = network.GetAction(OBS_LIST)
@@ -241,32 +259,6 @@ def Network():
                 ACT_LIST = []
                 REW_LIST = []
                 STATE = "state_train_result"
-
-
-def OneHot(value):
-    zero = np.zeros(OUTPUT_SIZE, dtype = np.int)
-    zero[value] = 1
-    return  zero
-
-def DiscountRewards(reward_memory):
-    v_memory = np.vstack(reward_memory)
-    discounted = np.zeros_like(v_memory, dtype=np.float32)
-    add_value = 0
-    length = len(reward_memory)
-
-    for i in reversed(range(length)):
-        if v_memory[i] < 0:
-            add_value = 0
-        add_value = v_memory[i] + (DISCOUNT * add_value)
-        discounted[i] = add_value
-
-    return discounted
-
-def NormalizeRewards(rewards, v_rewards):
-    a_reward = np.vstack(rewards) - np.vstack(v_rewards)
-    a_reward -= np.mean(a_reward)
-    a_reward /= (np.std(a_reward) + EPSILON)
-    return a_reward
 
 def main():
     threading.Thread(target=Server).start()
